@@ -132,3 +132,57 @@ fn test_transfer_happy_path() {
     assert_eq!(client.balance(&admin), initial_supply - transfer_amount);
     assert_eq!(client.balance(&recipient), transfer_amount);
 }
+
+#[test]
+#[should_panic]
+fn test_slash_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let staker = Address::generate(&env);
+    let initial_supply = 1000000000i128;
+    let stake_amount = 1000000i128;
+
+    let client = HUMTokenClient::new(&env, &env.register_contract(None, HUMToken));
+    client.initialize(&admin, &initial_supply);
+    client.transfer(&admin, &staker, &stake_amount);
+
+    env.mock_all_auths();
+    client.stake(&stake_amount, &staker);
+
+    // No mock_all_auths for slash — admin.require_auth() must panic
+    let env2 = Env::default();
+    let client2 = HUMTokenClient::new(&env2, &env2.register_contract(None, HUMToken));
+    client2.slash(&staker, &500000i128, &symbol_short!("fraud"));
+}
+
+#[test]
+fn test_unstake_not_staked() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let staker = Address::generate(&env);
+
+    let client = HUMTokenClient::new(&env, &env.register_contract(None, HUMToken));
+    client.initialize(&admin, &1000000000i128);
+
+    env.mock_all_auths();
+    let result = client.try_unstake(&1000000i128, &staker);
+    assert_eq!(result, Err(Ok(HumonicsError::NotStaked)));
+}
+
+#[test]
+fn test_stake_already_staked() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let staker = Address::generate(&env);
+    let stake_amount = 1000000i128;
+
+    let client = HUMTokenClient::new(&env, &env.register_contract(None, HUMToken));
+    client.initialize(&admin, &1000000000i128);
+    client.transfer(&admin, &staker, &(stake_amount * 2));
+
+    env.mock_all_auths();
+    client.stake(&stake_amount, &staker);
+
+    let result = client.try_stake(&stake_amount, &staker);
+    assert_eq!(result, Err(Ok(HumonicsError::AlreadyStaked)));
+}
