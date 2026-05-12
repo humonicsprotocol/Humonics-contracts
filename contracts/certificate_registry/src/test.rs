@@ -154,3 +154,95 @@ fn test_revoke_certificate_happy_path() {
     let certificate = client.get_certificate(&cert_id).unwrap();
     assert!(certificate.revoked_at.is_some());
 }
+
+#[test]
+fn test_revoke_certificate_already_revoked() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let verifier_address = env.register_contract(None, MockVerifier);
+    let client = CertificateRegistryClient::new(&env, &env.register_contract(None, CertificateRegistry));
+    client.initialize(&admin, &verifier_address);
+
+    let content_hash = BytesN::from_array(&env, &[1u8; 32]);
+    let zk_proof = soroban_sdk::Bytes::from_slice(&env, b"proof_data");
+    let mut public_signals = Vec::new(&env);
+    public_signals.push_back(BytesN::from_array(&env, &[2u8; 32]).into_val(&env));
+    public_signals.push_back(content_hash.clone().into_val(&env));
+    public_signals.push_back(1234567890u64.into_val(&env));
+    let did = Address::generate(&env).to_string();
+
+    env.as_contract(&verifier_address, || {
+        env.storage().instance().set(&symbol_short!("result"), &true);
+    });
+    env.mock_all_auths();
+
+    let cert_id = client.issue_certificate(
+        &content_hash, &zk_proof, &public_signals, &did, &symbol_short!("text"),
+    );
+
+    client.revoke_certificate(&cert_id, &symbol_short!("fraud"));
+
+    // Second revoke must fail
+    let result = client.try_revoke_certificate(&cert_id, &symbol_short!("fraud"));
+    assert_eq!(result, Err(Ok(HumonicsError::AlreadyRevoked)));
+}
+
+#[test]
+fn test_issue_certificate_invalid_proof() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let verifier_address = env.register_contract(None, MockVerifier);
+    let client = CertificateRegistryClient::new(&env, &env.register_contract(None, CertificateRegistry));
+    client.initialize(&admin, &verifier_address);
+
+    let content_hash = BytesN::from_array(&env, &[1u8; 32]);
+    let zk_proof = soroban_sdk::Bytes::from_slice(&env, b"bad_proof");
+    let mut public_signals = Vec::new(&env);
+    public_signals.push_back(BytesN::from_array(&env, &[2u8; 32]).into_val(&env));
+    public_signals.push_back(content_hash.clone().into_val(&env));
+    public_signals.push_back(1234567890u64.into_val(&env));
+    let did = Address::generate(&env).to_string();
+
+    // Mock verifier returns false
+    env.as_contract(&verifier_address, || {
+        env.storage().instance().set(&symbol_short!("result"), &false);
+    });
+    env.mock_all_auths();
+
+    let result = client.try_issue_certificate(
+        &content_hash, &zk_proof, &public_signals, &did, &symbol_short!("text"),
+    );
+    assert_eq!(result, Err(Ok(HumonicsError::InvalidProof)));
+}
+
+#[test]
+#[should_panic]
+fn test_revoke_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let verifier_address = env.register_contract(None, MockVerifier);
+    let client = CertificateRegistryClient::new(&env, &env.register_contract(None, CertificateRegistry));
+    client.initialize(&admin, &verifier_address);
+
+    let content_hash = BytesN::from_array(&env, &[1u8; 32]);
+    let zk_proof = soroban_sdk::Bytes::from_slice(&env, b"proof_data");
+    let mut public_signals = Vec::new(&env);
+    public_signals.push_back(BytesN::from_array(&env, &[2u8; 32]).into_val(&env));
+    public_signals.push_back(content_hash.clone().into_val(&env));
+    public_signals.push_back(1234567890u64.into_val(&env));
+    let did = Address::generate(&env).to_string();
+
+    env.as_contract(&verifier_address, || {
+        env.storage().instance().set(&symbol_short!("result"), &true);
+    });
+    env.mock_all_auths();
+
+    let cert_id = client.issue_certificate(
+        &content_hash, &zk_proof, &public_signals, &did, &symbol_short!("text"),
+    );
+
+    // No mock_all_auths — governance.require_auth() must panic
+    let env_no_auth = Env::default();
+    let client_no_auth = CertificateRegistryClient::new(&env_no_auth, &env_no_auth.register_contract(None, CertificateRegistry));
+    client_no_auth.revoke_certificate(&cert_id, &symbol_short!("fraud"));
+}
