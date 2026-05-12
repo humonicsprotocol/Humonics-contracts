@@ -13,11 +13,18 @@ pub struct Certificate {
     pub revoked_at: Option<u64>,
 }
 
+// NOTE: The spec defines VerificationResult as a struct with Option<Certificate>.
+// Soroban's #[contracttype] macro does not support Option<ContractType> fields inside
+// a struct — this is a Soroban SDK limitation. The enum below is semantically equivalent
+// and is the correct Soroban pattern. The SDK's parseCertificate must handle this shape.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VerificationResult {
+    /// Content has a valid, non-revoked certificate
     Certified(Certificate),
+    /// Content has no certificate on-chain
     NotCertified(Symbol),
+    /// Content has a certificate but it has been revoked
     Revoked(Certificate),
 }
 
